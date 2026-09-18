@@ -33,6 +33,50 @@ def rotation_matrix_to_euler_angles(R):
     return np.array([x, y, z])
 # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
+
+# --- USB CAMERA SHIM ---
+import cv2
+import time
+
+class USBPicamera2:
+    def __init__(self):
+        self.cap = None
+
+    def __enter__(self):
+        self.cap = cv2.VideoCapture(0)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.cap is not None:
+            self.cap.release()
+
+    def create_video_configuration(self, main=None, **kwargs):
+        return {}
+
+    def configure(self, config):
+        # Do not force the Pi-camera resolution onto the USB webcam
+        pass
+
+    def start(self):
+        if self.cap is None:
+            self.cap = cv2.VideoCapture(0)
+
+        if not self.cap.isOpened():
+            raise RuntimeError("Could not open USB camera /dev/video0")
+
+    def capture_array(self, *args, **kwargs):
+        # USB webcams can need a few frames to warm up
+        for _ in range(10):
+            ok, frame = self.cap.read()
+            if ok and frame is not None:
+                return frame
+            time.sleep(0.1)
+
+        raise RuntimeError("Could not read frame from USB camera /dev/video0")
+
+Picamera2 = USBPicamera2
+# --- END USB CAMERA SHIM ---
+
 class CommLab(object):
     os.environ["LIBCAMERA_LOG_LEVELS"] = "3"
     pigpio_factory = PiGPIOFactory()
@@ -93,7 +137,7 @@ class CommLab(object):
     
                 resize_image = cv2.flip(image, 1)
                 resize_frame = cv2.resize(resize_image, (0, 0), fx = 0.25, fy = 0.25)
-                _,ret_array = cv2.imencode('.jpg', resize_frame)
+                _,ret_array = cv2.imencode('.jpg', cv2.cvtColor(resize_frame, cv2.COLOR_RGB2BGR))
                 self.tracking_image.value = ret_array
                 
                 try:
@@ -140,5 +184,5 @@ class CommLab(object):
         stop_btn.on_click(self.stop_tracking)
         
         toolbar = widgets.HBox([start_btn, stop_btn])
-        disp = widgets.Box(children = [widgets.VBox([toolbar, self.disp_container])], layout=widgets.Layout(justify_content='center'))
+        disp = widgets.Box(children = [widgets.VBox([toolbar, self.tracking_image, self.disp_container])], layout=widgets.Layout(justify_content='center'))
         display.display(disp, self.output)
